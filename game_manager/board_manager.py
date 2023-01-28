@@ -112,7 +112,6 @@ class BoardData(object):
         self.currentDirection = 0
         self.currentShape = Shape() # initial current shape data
         self.nextShape = None
-        self.holdShape = None
         self.shape_info_stat = [0] * 8
         self.obstacle_height = 0
         self.obstacle_probability = 0
@@ -161,13 +160,11 @@ class BoardData(object):
         length = len(self.ShapeList)
         return length
 
-    def getShapeDataFromShapeClass(self, ShapeClass):
+    def getShapeData(self, ShapeNumber):
 
-        if ShapeClass == None:
-            return None, None, None
-
-        #ShapeClass = self.ShapeList[ShapeNumber]
+        ShapeClass = self.ShapeList[ShapeNumber]
         ShapeIdx = ShapeClass.shape
+
         ShapeRange = (0, 1, 2, 3)
         if ShapeIdx in (Shape.shapeI, Shape.shapeZ, Shape.shapeS):
             ShapeRange = (0, 1)
@@ -177,13 +174,6 @@ class BoardData(object):
             ShapeRange = (0, 1, 2, 3)
 
         return ShapeClass, ShapeIdx, ShapeRange
-
-    def getShapeData(self, ShapeNumber):
-        ShapeClass = self.ShapeList[ShapeNumber]
-        return self.getShapeDataFromShapeClass(ShapeClass)
-
-    def getholdShapeData(self):
-        return self.getShapeDataFromShapeClass(self.holdShape)
 
     def getCurrentShapeCoord(self):
         return self.currentShape.getCoords(self.currentDirection, self.currentX, self.currentY)
@@ -314,22 +304,6 @@ class BoardData(object):
         else:
             #print("failed to rotateLeft..")
             return False
-        return True
-
-    def exchangeholdShape(self):
-        if self.holdShape == None:
-            # if holdShape not exists, set holdShape
-            self.holdShape = self.currentShape
-            self.createNewPiece()
-            return False
-        else:
-            # if holdShape exists, exchange shapes
-            self.holdShape,self.currentShape = self.currentShape,self.holdShape
-            # init current X,Y,Direction
-            minX, maxX, minY, maxY = self.nextShape.getBoundingOffsets(0)
-            self.currentX = 5
-            self.currentY = -minY
-            self.currentDirection = 0
         return True
 
     def removeFullLines(self):
