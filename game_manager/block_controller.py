@@ -24,9 +24,9 @@ class Block_Controller(object):
     # output
     #    nextMove : nextMove structure which includes next shape position and the other.
     def GetNextMove(self, nextMove, GameStatus):
-        self.MYDEBUG=LIB_TETRIS.MYDEBUG
-        self.DEBUG = False
- 
+        self.MYDEBUG = LIB_TETRIS.MYDEBUG
+        self.DEBUG = True
+
         t1 = time.time()
         # print GameStatus
         if self.DEBUG: print("=================================================>")
@@ -41,41 +41,34 @@ class Block_Controller(object):
                     tmpstr = tmpstr + str(GameStatus["field_info"]["backboard"][jj*GameStatus["field_info"]["width"]+ii]) + ' '
                 print(format(jj,'02d'),tmpstr)
             print('-- 0 1 2 3 4 5 6 7 8 9 0 --' )
-        # # get data from GameStatus
-        # # current shape info
-        # CurrentShapeDirectionRange = GameStatus["block_info"]["currentShape"]["direction_range"]
-        # self.CurrentShape_class = GameStatus["block_info"]["currentShape"]["class"]
-        # self.CurrentShape_index = GameStatus["block_info"]["currentShape"]["index"]
-        # # next shape info
-        # NextShapeDirectionRange = GameStatus["block_info"]["nextShape"]["direction_range"]
-        # self.NextShape_class = GameStatus["block_info"]["nextShape"]["class"]
-        # self.NextShape_index = GameStatus["block_info"]["nextShape"]["index"]
-        # # current board info
-        # self.board_backboard = GameStatus["field_info"]["backboard"]
-        # # default board definition
-        # self.board_data_width = GameStatus["field_info"]["width"]
-        # self.board_data_height = GameStatus["field_info"]["height"]
-        # self.ShapeNone_index = GameStatus["debug_info"]["shape_info"]["shapeNone"]["index"]
+
 
         EvalValue,x0,direction0 = LIB_TETRIS.calcEvaluationValue(GameStatus)
-        strategy = (direction0,x0,1,1)
-        if (self.MYDEBUG) : print("<<< isshy-you:(EvalValue,shape,strategy(dir,x,y_ope,y_mov))=(",EvalValue,GameStatus["block_info"]["currentShape"]["index"],strategy,")")
+        strategy = (direction0,x0,1,1,'n')
+        if (self.MYDEBUG) : print("<<< seiki-you:(EvalValue,shape,strategy(dir,x,y_ope,y_mov))="
+                                  "(",EvalValue,GameStatus["block_info"]["currentShape"]["index"],strategy,")")
         processtime = time.time()-t1
         if self.DEBUG:  print("=== block index     === (", GameStatus["block_info"]["currentShape"]["index"],")")
         if self.DEBUG:  print("=== processing time === (", processtime,") under usec(",processtime<0.001,")")
         nextMove["strategy"]["direction"] = strategy[0]
+        #nextMove["strategy"]["direction"] = 1
         nextMove["strategy"]["x"] = strategy[1]
+        #nextMove["strategy"]["x"] = 1
         nextMove["strategy"]["y_operation"] = strategy[2]
+        #nextMove["strategy"]["y_operation"] = 2
         nextMove["strategy"]["y_moveblocknum"] = strategy[3]
+        #nextMove["strategy"]["y_moveblocknum"] = 2
+        nextMove["strategy"]["use_hold_function"] = strategy[4]
         # print("=== nextMove:",nextMove)
         if self.DEBUG:  print("=== nextMove        === dir(",strategy[0],") xpos(",strategy[1],")")
+        #print(GameStatus)
         return nextMove
 
 
 
 class lib_tetris:
     def __init__(self):
-        self.MYDEBUG = False
+        self.MYDEBUG = True
         self.ChangeHieght = 13
 
         # Type-I(0)
@@ -398,24 +391,7 @@ class lib_tetris:
 
         self.horder = [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]
-        # order0=[]
-        # order1=[]
-        # order2=[]
-        # order3=[]
-        # width = 10
-        # for ii in range(width):
-        #     order0.append(ii)
-        #     order1.append(width-ii-1)
-        #     if ii%2==0 :
-        #         order2.append(ii//2)
-        #         order3.append((width-ii-1)//2)
-        #     else:
-        #         order2.append(width-1-ii//2)
-        #         order3.append(width-1-(width-ii-1)//2)
-        # self.horder.append(order0)
-        # self.horder.append(order1)
-        # self.horder.append(order2)
-        # self.horder.append(order3)
+
         self.horder[0] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         self.horder[1] = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
         self.horder[2] = [0, 9, 1, 8, 2, 7, 3, 6, 4, 5]
@@ -465,8 +441,9 @@ class lib_tetris:
         self.index_next3 = GameStatus["block_info"]["nextShapeList"]['element3']["index"]
         self.index_next4 = GameStatus["block_info"]["nextShapeList"]['element4']["index"]
         self.index_next5 = GameStatus["block_info"]["nextShapeList"]['element5']["index"]
+        self.hold_shape = GameStatus["block_info"]['holdShape']["index"]
         blockheight = self.maxblockheight(self.board)
-        if ((self.MYDEBUG)): print('blockheight=', blockheight)
+        #if ((self.MYDEBUG)): print('blockheight=', blockheight)
         order = self.makehorizontalorder(blockheight)
         ypos_change = -3
         point = [-1, -1, -1, -1]  # point,x,y,direction
@@ -479,13 +456,16 @@ class lib_tetris:
                 pat3 = pat4 >> 4
                 pat2 = pat4 >> 8
                 pat = [pat2, pat3, pat4]
+                print("bbbbbbbb")
+                print(pat)
                 for direction in self.dic_dir[self.index]:
                     nopoint = 0
                     hole = 0
                     if (x <= (self.width - self.dic_widx[self.index][direction])) \
                             and (pat[self.dic_pat[self.index][direction]] in self.dic_pat_dir[self.index][direction]):
-                        # if self.MYDEBUG:
-                        #     print('index,direction,patno,pat=',self.index,direction,self.dic_pat[self.index][direction],pat[self.dic_pat[self.index][direction]])
+                        if self.MYDEBUG:
+                            print('index,direction,patno,pat=',self.index,direction,self.dic_pat[self.index][direction],
+                                  pat[self.dic_pat[self.index][direction]])
                         basepoint = self.dic_pat_dir[self.index][direction][pat[self.dic_pat[self.index][direction]]]
                         # if y >= ypos_change:
                         getpoint = basepoint + (y * 2)
@@ -511,7 +491,7 @@ class lib_tetris:
                                 if (hole > 0):
                                     if (self.MYDEBUG): print("### find HOLE next index", self.index_next1,
                                                              self.index_next2, self.index_next3, self.index_next4,
-                                                             self.index_next5)
+                                                             self.index_next5, self.hold_shape)
                                     if (self.MYDEBUG): print("### find HOLE (", hole, ")", xx, y, format(pat4, '04x'))
                                     if hole >= 2 and self.index_next1 == 1:
                                         getpoint = getpoint - int(hole)
@@ -533,7 +513,7 @@ class lib_tetris:
                                           ",dir =", point[3],
                                           ",pat =", format(pat[self.dic_pat[self.index][direction]], '04x'))
 
-            # if (self.MYDEBUG) : print("x,y,pat=",x,y,format(pat4,'04x'),"point=",point)
+            if (self.MYDEBUG) : print("x,y,pat=",x,y,format(pat4,'04x'),"point=",point)
         return point[0], point[1], point[3]
 
     def calcBoardPat(self, board, x, y, xofs):
@@ -565,6 +545,8 @@ class lib_tetris:
             else:
                 patx[xx - x] = 15
         pat = patx[0] * 4096 + patx[1] * 256 + patx[2] * 16 + patx[3]
+        print("aaaaaaaa")
+        print(pat)
         return (pat)
 
 
