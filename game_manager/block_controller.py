@@ -268,33 +268,10 @@ class Block_Controller(object):
         total_none_cols = self.get_total_none_cols(board)
         dy_right = peaks[-2] - peaks[-1]
 
-        #20220806
-        #eval_list = np.array([fullLines, nPeaks, maxY, maxY_right, nHoles, total_col_with_hole,
-            #x_transitions, y_transitions, total_dy, maxWell])
-
-        #20220810-1
-        #eval_list = np.array([fullLines**2, nPeaks, maxY, nHoles,
-            #x_transitions, y_transitions, total_dy, maxWell,total_col_with_hole, total_none_cols])
-
-        #20220810-2
-        #if fullLines < 3:
-            #fullLines = 0
-        #eval_list = np.array([fullLines, nPeaks, maxY, nHoles,
-            #x_transitions, y_transitions, total_dy, maxWell,total_col_with_hole, total_none_cols])
-
-        #20220820
-        #eval_list = np.array([fullLines, nPeaks, maxY, nHoles, x_transitions, y_transitions])
-
-        #20220824
         eval_list = np.array([nPeaks, nHoles, total_col_with_hole, total_dy,
             x_transitions, y_transitions, total_none_cols, maxWell, fullLines])
-        
-        #print("individual", self.individual)
-        #print("eval_list", eval_list)
+
         score = np.dot(self.individual, np.transpose(eval_list))
-        #if not ShapeListClass.shape == 1:
-            #if mode == Mode.NORMAL and fullLines < 3:
-                #score += 1000 * dy_right
 
         if mode == Mode.NORMAL and fullLines < 3:
             score -= 1000 * maxY_right
@@ -302,10 +279,6 @@ class Block_Controller(object):
         if fullLines == 4:
             score += 10000
 
-        #if mode == Mode.ATTACK and fullLines < 4:
-            #score -= 1000 * maxY_right
-
-        #print ("score", score)
         return score
     
     def get_peaks(self, board):
