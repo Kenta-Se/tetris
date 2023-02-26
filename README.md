@@ -86,7 +86,7 @@ git clone https://github.com/seigot/tetris
 ゲーム開始用スクリプトを実行
 
 ```shell
-cd tetris
+cd tetris_20230226
 python start.py
 ```
 

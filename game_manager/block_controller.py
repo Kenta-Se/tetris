@@ -1,20 +1,32 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
-
-# from datetime import datetime
-import time
-import pprint
+from time import time
 import copy
+from enum import Enum
+import numpy as np
+import csv
+import os
+from heapq import heapify, heappush, heappop, heappushpop, nlargest
+import copy
+import logging
+
+logging.basicConfig(level=logging.DEBUG, format='%(levelname)s %(asctime)s: %(message)s')
+
+class Mode(Enum):
+    NORMAL = 1
+    ATTACK = 2
+    DEFENCE = 3
 
 class Block_Controller(object):
 
-    # init parameter
-    board_backboard = 0
-    board_data_width = 0
-    board_data_height = 0
-    ShapeNone_index = 0
-    CurrentShape_class = 0
-    NextShape_class = 0
+    def __init__(self):
+        # init parameter
+        self.individual = self.get_individual(csv_file = 
+            os.path.dirname(os.path.abspath(__file__)) + "/individual.csv")
+        self.beam_width = 10
+        self.estimate_num = 5
+        self.hold = False
+        
 
     # GetNextMove is main function.
     # input
@@ -24,532 +36,376 @@ class Block_Controller(object):
     # output
     #    nextMove : nextMove structure which includes next shape position and the other.
     def GetNextMove(self, nextMove, GameStatus):
-        self.MYDEBUG = LIB_TETRIS.MYDEBUG
-        self.DEBUG = True
 
-        t1 = time.time()
-        # print GameStatus
-        if self.DEBUG: print("=================================================>")
-        del GameStatus["field_info"]["withblock"]
-        # pprint.pprint(GameStatus, width = 61, compact = True)
-        if self.MYDEBUG: print('[board] index =',GameStatus["block_info"]["currentShape"]["index"])
-        # if self.MYDEBUG: pprint.pprint(GameStatus["field_info"]["backboard"], width = 31, compact = True)
-        if self.MYDEBUG: 
-            for jj in range(GameStatus["field_info"]["height"]):
-                tmpstr=''
-                for ii in range(GameStatus["field_info"]["width"]):
-                    tmpstr = tmpstr + str(GameStatus["field_info"]["backboard"][jj*GameStatus["field_info"]["width"]+ii]) + ' '
-                print(format(jj,'02d'),tmpstr)
-            print('-- 0 1 2 3 4 5 6 7 8 9 0 --' )
+        t1 = time()
 
+        ## Get data from GameStatus
+        # current shape info
+        CurrentShapeDirectionRange = GameStatus["block_info"]["currentShape"]["direction_range"]
+        CurrentShapeClass = GameStatus["block_info"]["currentShape"]["class"]
+        logging.debug('CurrentShapeClass: {}'.format(CurrentShapeClass))
+        # next shape info
+        ShapeListDirectionRange = []
+        ShapeListClass = []
+        for i in range(1,6):
+            ElementNo = "element" + str(i)
+            ShapeListDirectionRange.append(GameStatus["block_info"]["nextShapeList"][ElementNo]["direction_range"])
+            ShapeListClass.append(GameStatus["block_info"]["nextShapeList"][ElementNo]["class"])
+            logging.debug('ShapeListClass {}:{}'.format(ElementNo, GameStatus["block_info"]["nextShapeList"][ElementNo]["class"]))
+        # hold shape info
+        HoldShapeDirectionRange = GameStatus["block_info"]["holdShape"]["direction_range"]
+        HoldShapeClass = GameStatus["block_info"]["holdShape"]["class"]
+        logging.debug('HoldShapeClass: {}'.format(HoldShapeClass))
 
-        EvalValue,x0,direction0 = LIB_TETRIS.calcEvaluationValue(GameStatus)
-        strategy = (direction0,x0,1,1,'n')
-        if (self.MYDEBUG) : print("<<< seiki-you:(EvalValue,shape,strategy(dir,x,y_ope,y_mov))="
-                                  "(",EvalValue,GameStatus["block_info"]["currentShape"]["index"],strategy,")")
-        processtime = time.time()-t1
-        if self.DEBUG:  print("=== block index     === (", GameStatus["block_info"]["currentShape"]["index"],")")
-        if self.DEBUG:  print("=== processing time === (", processtime,") under usec(",processtime<0.001,")")
+        # current board info
+        self.board_backboard = GameStatus["field_info"]["backboard"]
+        # default board definition
+        self.board_data_width = GameStatus["field_info"]["width"]
+        self.board_data_height = GameStatus["field_info"]["height"]
+        self.ShapeNone_index = GameStatus["debug_info"]["shape_info"]["shapeNone"]["index"]
+        # change board list in numpy list
+        self.board_backboard_np = np.array(self.board_backboard).reshape(self.board_data_height, self.board_data_width)
+
+        # Decide mode
+        mode = self.decideMode(self.board_backboard_np)
+        top_strategy = []
+        heapify(top_strategy)
+
+        # current shape search
+        count = 0
+        for direction0 in CurrentShapeDirectionRange:
+            # search with x range
+            x0Min, x0Max = self.getSearchXRange(CurrentShapeClass, direction0)
+            for x0 in range(x0Min, x0Max):
+                # get board data, as if dropdown block
+                board, dy= self.getDropDownBoard(self.board_backboard_np, CurrentShapeClass, direction0, x0)
+                # evaluate board
+                EvalValue = self.calcEvaluationValue(board, dy, CurrentShapeClass, mode)
+                # get board removed fulllines
+                board, _ = self.removeFullLines(board)
+                strategy = (direction0, x0, 1, 1, 'n')
+                # update best move
+                if len(top_strategy) < self.beam_width:
+                    heappush(top_strategy, (EvalValue, count, strategy, board))
+                else:
+                    heappushpop(top_strategy, (EvalValue, count, strategy, board))
+                count += 1
+        
+        if self.hold:
+            #Hold shape search
+            for direction0 in HoldShapeDirectionRange:
+                # search with x range
+                x0Min, x0Max = self.getSearchXRange(HoldShapeClass, direction0)
+                for x0 in range(x0Min, x0Max):
+                    # get board data, as if dropdown block
+                    board, dy= self.getDropDownBoard(self.board_backboard_np, HoldShapeClass, direction0, x0)
+                    # evaluate board
+                    EvalValue = self.calcEvaluationValue(board, dy, HoldShapeClass, mode)
+                    # get board removed fulllines
+                    board, _ = self.removeFullLines(board)
+                    strategy = (direction0, x0, 1, 1, 'y')
+                    # update best move
+                    if len(top_strategy) < self.beam_width:
+                        heappush(top_strategy, (EvalValue, count, strategy, board))
+                    else:
+                        heappushpop(top_strategy, (EvalValue, count, strategy, board))
+                    count += 1
+
+        
+        for i in range(self.estimate_num):
+            next_strategy = []
+            heapify(next_strategy)
+            for lasteval,_, strategy, board in top_strategy:
+                for direction1 in ShapeListDirectionRange[i]:
+                    x1Min, x1Max = self.getSearchXRange(ShapeListClass[i], direction1)
+                    for x1 in range(x1Min, x1Max):
+                        board2, dy = self.getDropDownBoard(board, ShapeListClass[i], direction1, x1)
+                        EvalValue = self.calcEvaluationValue(board2, dy, ShapeListClass[i], mode) + lasteval
+                        board2, _ = self.removeFullLines(board2)
+                        # update best move
+                        if len(next_strategy) < self.beam_width:
+                            heappush(next_strategy, (EvalValue, count, strategy, board2))
+                        else:
+                            heappushpop(next_strategy, (EvalValue, count, strategy, board2))
+                        count +=1
+            top_strategy = copy.deepcopy(next_strategy)
+        
+        max_strategy = nlargest(1, top_strategy)
+        strategy = max_strategy[0][2]
+
+        logging.debug('Mode: {}'.format(mode))
+        logging.debug('Search time: {}'.format(time() - t1))
         nextMove["strategy"]["direction"] = strategy[0]
-        #nextMove["strategy"]["direction"] = 1
         nextMove["strategy"]["x"] = strategy[1]
-        #nextMove["strategy"]["x"] = 1
         nextMove["strategy"]["y_operation"] = strategy[2]
-        #nextMove["strategy"]["y_operation"] = 2
         nextMove["strategy"]["y_moveblocknum"] = strategy[3]
-        #nextMove["strategy"]["y_moveblocknum"] = 2
-        nextMove["strategy"]["use_hold_function"] = strategy[4]
-        # print("=== nextMove:",nextMove)
-        if self.DEBUG:  print("=== nextMove        === dir(",strategy[0],") xpos(",strategy[1],")")
-        #print(GameStatus)
+        if self.hold:
+            nextMove["strategy"]["use_hold_function"] = strategy[4]
+        else:
+            nextMove["strategy"]["use_hold_function"] = "y"
+            self.hold = True
+
         return nextMove
 
+    def get_individual(self, csv_file = "individual.csv"):
+        with open(csv_file, 'r') as csv_file:
+            reader = csv.reader(csv_file)
+            ind_list = []
+            for row in reader:
+                if reader.line_num == 2:
+                    for col in row:
+                        ind_list.append(float(col))
+                    break
+            return np.array(ind_list)
 
+    def getSearchXRange(self, Shape_class, direction):
+        #
+        # get x range from shape direction.
+        #
+        minX, maxX, _, _ = Shape_class.getBoundingOffsets(direction) # get shape x offsets[minX,maxX] as relative value.
+        xMin = -1 * minX
+        xMax = self.board_data_width - maxX
+        return xMin, xMax
 
-class lib_tetris:
-    def __init__(self):
-        self.MYDEBUG = True
-        self.ChangeHieght = 13
+    def getShapeCoordArray(self, Shape_class, direction, x, y):
+        #
+        # get coordinate array by given shape.
+        #
+        coordArray = Shape_class.getCoords(direction, x, y) # get array from shape direction, x, y.
+        return coordArray
 
-        # Type-I(0)
-        # Dir0
-        dic_0_0 = {0x0f: 8, 0x0e: 8, 0x0d: 8, 0x0c: 8, 0x0b: 8, 0x0a: 8, 0x09: 8, 0x08: 8
-            , 0x07: 6, 0x06: 6, 0x05: 6, 0x04: 6
-            , 0x03: 3, 0x02: 3
-            , 0x01: 2
-            , 0x00: 1
-                   }
-        # Dir1
-        dic_0_1 = {0x3333: 8, 0x2222: 8, 0x1111: 8
-            , 0x2333: 7, 0x3233: 7, 0x3323: 7, 0x3332: 7  # ish06e01
-            , 0x2233: 7, 0x2323: 7, 0x3223: 7, 0x3232: 7, 0x3322: 7, 0x2332: 7  # ish06e01
-            , 0x2223: 7, 0x2232: 7, 0x2322: 7, 0x3222: 7  # ish06e01
-            , 0x1333: 3, 0x3133: 3, 0x3313: 3, 0x3331: 3
-            , 0x1233: 3, 0x2133: 3, 0x2313: 3, 0x2331: 3
-            , 0x1323: 3, 0x3123: 3, 0x3213: 3, 0x3231: 3
-            , 0x1332: 3, 0x3132: 3, 0x3312: 3, 0x3321: 3
-            , 0x1223: 3, 0x2123: 3, 0x2213: 3, 0x2231: 3
-            , 0x1232: 3, 0x2132: 3, 0x2312: 3, 0x2321: 3
-            , 0x1322: 3, 0x3122: 3, 0x3212: 3, 0x3221: 3
-            , 0x1222: 3, 0x2122: 3, 0x2212: 3, 0x2221: 3}
-        # Dir2
-        dic_0_2 = {0xf0: 8, 0x80: 8, 0x90: 8, 0xa0: 8, 0xb0: 8, 0xc0: 8, 0xd0: 8, 0xe0: 8
-            , 0x70: 6, 0x60: 6, 0x50: 6, 0x40: 6
-            , 0x30: 3, 0x20: 3
-            , 0x10: 2
-            , 0x00: 1
-                   }
-        # Dir3
-        dic_0_3 = {0xf0f: 9, 0xe0f: 9, 0xd0f: 9, 0xc0f: 9, 0xb0f: 9, 0xa0f: 9, 0x90f: 9, 0x80f: 9
-            , 0xf0e: 9, 0xe0e: 9, 0xd0e: 9, 0xc0e: 9, 0xb0e: 9, 0xa0e: 9, 0x90e: 9, 0x80e: 9
-            , 0xf0d: 9, 0xe0d: 9, 0xd0d: 9, 0xc0d: 9, 0xb0d: 9, 0xa0d: 9, 0x90d: 9, 0x80d: 9
-            , 0xf0c: 9, 0xe0c: 9, 0xd0c: 9, 0xc0c: 9, 0xb0c: 9, 0xa0c: 9, 0x90c: 9, 0x80c: 9
-            , 0xf0b: 9, 0xe0b: 9, 0xd0b: 9, 0xc0b: 9, 0xb0b: 9, 0xa0b: 9, 0x90b: 9, 0x80b: 9
-            , 0xf0a: 9, 0xe0a: 9, 0xd0a: 9, 0xc0a: 9, 0xb0a: 9, 0xa0a: 9, 0x90a: 9, 0x80a: 9
-            , 0xf09: 9, 0xe09: 9, 0xd09: 9, 0xc09: 9, 0xb09: 9, 0xa09: 9, 0x909: 9, 0x809: 9
-            , 0xf08: 9, 0xe08: 9, 0xd08: 9, 0xc08: 9, 0xb08: 9, 0xa08: 9, 0x908: 9, 0x808: 9
-            , 0xf07: 7, 0xf06: 7, 0xf05: 7, 0xf04: 7
-            , 0xe07: 7, 0xe06: 7, 0xe05: 7, 0xe04: 7
-            , 0xd07: 7, 0xd06: 7, 0xd05: 7, 0xd04: 7
-            , 0xc07: 7, 0xc06: 7, 0xc05: 7, 0xc04: 7
-            , 0xb07: 7, 0xb06: 7, 0xb05: 7, 0xb04: 7
-            , 0xa07: 7, 0xa06: 7, 0xa05: 7, 0xa04: 7
-            , 0x907: 7, 0x906: 7, 0x905: 7, 0x904: 7
-            , 0x807: 7, 0x806: 7, 0x805: 7, 0x804: 7
-            , 0x70f: 7, 0x60f: 7, 0x50f: 7, 0x40f: 7
-            , 0x70e: 7, 0x60e: 7, 0x50e: 7, 0x40e: 7
-            , 0x70d: 7, 0x60d: 7, 0x50d: 7, 0x40d: 7
-            , 0x70c: 7, 0x60c: 7, 0x50c: 7, 0x40c: 7
-            , 0x70b: 7, 0x60b: 7, 0x50b: 7, 0x40b: 7
-            , 0x70a: 7, 0x60a: 7, 0x50a: 7, 0x40a: 7
-            , 0x709: 7, 0x609: 7, 0x509: 7, 0x409: 7
-            , 0x708: 7, 0x608: 7, 0x508: 7, 0x408: 7
-            , 0xf03: 5, 0xe03: 5, 0xd03: 5, 0xc03: 5, 0xb03: 5, 0xa03: 5, 0x903: 5, 0x803: 5
-            , 0xf02: 5, 0xe02: 5, 0xd02: 5, 0xc02: 5, 0xb02: 5, 0xa02: 5, 0x902: 5, 0x802: 5
-            , 0x30f: 5, 0x30e: 5, 0x30d: 5, 0x30c: 5, 0x30b: 5, 0x30a: 5, 0x309: 5, 0x308: 5
-            , 0x20f: 5, 0x20e: 5, 0x20d: 5, 0x20c: 5, 0x20b: 5, 0x20a: 5, 0x209: 5, 0x208: 5
-            , 0x707: 6, 0x706: 6, 0x705: 6, 0x704: 6
-            , 0x607: 6, 0x606: 6, 0x605: 6, 0x604: 6
-            , 0x507: 6, 0x506: 6, 0x505: 6, 0x504: 6
-            , 0x407: 6, 0x406: 6, 0x405: 6, 0x404: 6
-            , 0x303: 4, 0x302: 4, 0x203: 4, 0x202: 4
-            , 0x301: 3, 0x201: 3, 0x102: 3, 0x103: 3
-            , 0x101: 2, 0x100: 2, 0x001: 2}
+    def getDropDownBoard(self, board_backboard, Shape_class, direction, x):
+        # 
+        # get new board.
+        #
+        # copy backboard data to make new board.
+        # if not, original backboard data will be updated later.
+        board = copy.deepcopy(board_backboard)
+        _board, dy = self.dropDown(board, Shape_class, direction, x)
+        return _board, dy
+    
+    def removeFullLines(self, board):
+        height = board.shape[0]
+        width = board.shape[1]
+        newBoard = np.zeros((height, width))
+        newY = height - 1
+        fullLines = 0
+        for y in range(height - 1, -1, -1):
+            blockCount = sum([1 if board[y, x] > 0 else 0 for x in range(width)])
+            if blockCount < width and blockCount > 0:
+                for x in range(width):
+                    newBoard[newY, x] = board[y, x]
+                newY -= 1
+            elif blockCount == width:
+                fullLines += 1
+        return newBoard, fullLines
 
-        dic_alix_0 = [0, 2, 1, 1]
-        dic_aliy_0 = [1, 0, 1, 1]  # not use
-        dic_ofsx_0 = [0, 0, 1, 1]  # not use
-        dic_widx_0 = [1, 4, 1, 1]
-        dic_widy_0 = [4, 1, 4, 4]  # not use
+    def dropDown(self, board, Shape_class, direction, x):
+        # 
+        # internal function of getBoard.
+        # -- drop down the shape on the board.
+        # 
+        height = board.shape[0]
+        dy = height - 1
+        coordArray = self.getShapeCoordArray(Shape_class, direction, x, 0)
+        # update dy
+        for _x, _y in coordArray:
+            _yy = 0
+            while _yy + _y < height and (_yy + _y < 0 or board[_y + _yy, _x] == self.ShapeNone_index):
+                _yy += 1
+            _yy -= 1
+            if _yy < dy:
+                dy = _yy
+        # get new board
+        _board = self.dropDownWithDy(board, Shape_class, direction, x, dy)
+        return _board, dy
 
-        dic_dir_0 = [0, 1]
-        dic_pat_0 = [0, 2]  # pat2:0,pat3:1,pat4:2
+    def dropDownWithDy(self, board, Shape_class, direction, x, dy):
+        #
+        # internal function of dropDown.
+        #
+        _board = board
+        coordArray = self.getShapeCoordArray(Shape_class, direction, x, 0)
+        for _x, _y in coordArray:
+            _board[_y + dy, _x] = Shape_class.shape
+        return _board
+    
+    def decideMode(self, board):
+        mode = Mode.DEFENCE
+        peaks = self.get_peaks(board)
+        maxY = np.max(peaks)
+        holes = self.get_holes(board, peaks)
+        n_holes = np.sum(holes)
+        wells = self.get_wells(board, peaks)
+        second_well = np.sort(wells)[-2]
+        if second_well < 5 and maxY < 15 and n_holes < 4:
+            mode = Mode.NORMAL
+        #if second_well < 5 and maxY < 12 and n_holes < 4:
+            #mode = Mode.ATTACK
+        #print("mode:", mode)
+        return mode
 
-        # TYPE-L(1)
-        # Dir0
-        dic_1_0 = {0x11: 7, 0x10: 1, 0x01: 1}
-        # Dir1
-        dic_1_1 = {0x133: 8, 0x123: 7, 0x132: 7, 0x122: 7,  # for Lv2~ (Lv1:17520)
-                   # {0x133:8,0x123:8,0x132:8,0x122:8,   #for Lv1  (Lv1:18783)
-                   0x131: 4, 0x121: 4,
-                   0x130: 2, 0x120: 2,
-                   0x033: 2, 0x032: 2, 0x023: 2, 0x022: 2,
-                   0x031: 1, 0x021: 1}
-        # Dir2
-        dic_1_2 = {0x71: 6, 0x61: 6, 0x51: 6, 0x41: 6,
-                   0x70: 1, 0x60: 1, 0x50: 1, 0x40: 1,  # for Lv3
-                   0xf1: 2, 0xe1: 2, 0xd1: 2, 0xc1: 2, 0xb1: 2, 0xa1: 2, 0x91: 2, 0x81: 2}  # add 210727a
-        # Dir3
-        dic_1_3 = {0x111: 9, 0x110: 3, 0x101: 3, 0x011: 3
-            , 0x331: 4, 0x321: 4, 0x231: 4, 0x221: 4
-            , 0x100: 1, 0x010: 1, 0x001: 1
-            , 0x311: 2, 0x211: 2, 0x131: 2, 0x121: 2, 0x113: 2, 0x112: 2}
+    def calcEvaluationValue(self, board, dy, ShapeListClass, mode = Mode.ATTACK):
+        # calc Evaluation Value
 
-        dic_alix_1 = [0, 1, 1, 1]
-        dic_aliy_1 = [1, 1, 1, 1]
-        dic_ofsx_1 = [0, 0, 0, 0]
-        dic_widx_1 = [2, 3, 2, 3]
-        dic_widy_1 = [3, 2, 3, 2]
+        #before remove full lines
+        peaks_before = self.get_peaks(board)
+        maxY_right = peaks_before[-1]
 
-        dic_dir_1 = [0, 1, 2, 3]
-        dic_pat_1 = [0, 1, 0, 1]  # pat2:0,pat3:1,pat4:2
+        #after remove full lines
+        board, fullLines = self.removeFullLines(board)
+        peaks = self.get_peaks(board)
+        nPeaks = peaks.sum()
+        maxY = np.max(peaks)
+        holes = self.get_holes(board, peaks)
+        nHoles = np.sum(holes)
+        total_col_with_hole = self.get_total_cols_with_hole(board, holes)
+        x_transitions = self.get_x_transitions(board, maxY)
+        y_transitions = self.get_y_transitions(board, peaks)
+        total_dy = self.get_total_dy(board, peaks)
+        wells = self.get_wells(board, peaks)
+        maxWell = np.max(wells)
+        total_none_cols = self.get_total_none_cols(board)
+        dy_right = peaks[-2] - peaks[-1]
 
-        # TYPE-J(2)
-        # Dir0
-        dic_2_0 = {0x11: 7, 0x10: 1, 0x01: 1}
-        # Dir1
-        dic_2_1 = {0x111: 9, 0x110: 3, 0x101: 3, 0x011: 3
-            , 0x331: 4, 0x321: 4, 0x231: 4, 0x221: 4
-            , 0x100: 1, 0x010: 1, 0x001: 1
-            , 0x311: 2, 0x211: 2, 0x131: 2, 0x121: 2, 0x113: 2, 0x112: 2}
-        # Dir2
-        dic_2_2 = {0x17: 6, 0x16: 6, 0x15: 6, 0x14: 6,
-                   0x07: 1, 0x06: 1, 0x05: 1, 0x04: 1,
-                   0x1f: 2, 0x1e: 2, 0x1d: 2, 0x1c: 2, 0x1b: 2, 0x1a: 2, 0x19: 2, 0x18: 2}  # add 210727a
-        # Dir3
-        dic_2_3 = {0x331: 8, 0x321: 8, 0x231: 8, 0x221: 8,  # for Lv2~ (Lv1:17520)
-                   # {0x331:8,0x321:8,0x231:8,0x221:8,  #for Lv1  (Lv1:18783)
-                   0x131: 4, 0x121: 4, 0x031: 3, 0x021: 3,
-                   0x033: 2, 0x032: 2, 0x023: 2, 0x022: 2,
-                   0x031: 1, 0x021: 1}
+        #20220806
+        #eval_list = np.array([fullLines, nPeaks, maxY, maxY_right, nHoles, total_col_with_hole,
+            #x_transitions, y_transitions, total_dy, maxWell])
 
-        dic_alix_2 = [1, 1, 0, 1]
-        dic_aliy_2 = [1, 1, 1, 0]  # not use
-        dic_ofsx_2 = [0, 0, 0, 0]  # not use
-        dic_widx_2 = [2, 3, 2, 3]  # not use
-        dic_widy_2 = [3, 2, 3, 2]
+        #20220810-1
+        #eval_list = np.array([fullLines**2, nPeaks, maxY, nHoles,
+            #x_transitions, y_transitions, total_dy, maxWell,total_col_with_hole, total_none_cols])
 
-        dic_dir_2 = [0, 1, 2, 3]
-        dic_pat_2 = [0, 1, 0, 1]  # pat2:0,pat3:1,pat4:2
+        #20220810-2
+        #if fullLines < 3:
+            #fullLines = 0
+        #eval_list = np.array([fullLines, nPeaks, maxY, nHoles,
+            #x_transitions, y_transitions, total_dy, maxWell,total_col_with_hole, total_none_cols])
 
-        # TYPE-T(3)
-        # Dir0
-        dic_3_0 = {0x13: 6, 0x12: 6,
-                   0x11: 2, 0x10: 1}  # for Lv3
-        # Dir1
-        dic_3_1 = {0x313: 8, 0x213: 8, 0x312: 8, 0x212: 8,
-                   0x515: 2,
-                   0x101: 2}
-        # Dir2
-        dic_3_2 = {0x31: 6, 0x21: 6,
-                   # 0x53:3,0x52:2,
-                   0x11: 2, 0x01: 1}  # for Lv3
-        # Dir3
-        dic_3_3 = {0x111: 7,
-                   0x110: 2, 0x101: 2, 0x011: 2,
-                   0x331: 3, 0x321: 3, 0x231: 3, 0x221: 3,
-                   0x313: 3, 0x213: 3, 0x312: 3, 0x212: 3,
-                   0x133: 3, 0x123: 3, 0x132: 3, 0x122: 3,
-                   0x100: 1, 0x010: 1, 0x001: 1}
+        #20220820
+        #eval_list = np.array([fullLines, nPeaks, maxY, nHoles, x_transitions, y_transitions])
 
-        dic_alix_3 = [0, 1, 1, 1]
-        dic_aliy_3 = [1, 1, 1, 0]  # not use
-        dic_ofsx_3 = [0, 0, 0, 0]  # not use
-        dic_widx_3 = [2, 3, 2, 3]
-        dic_widy_3 = [3, 2, 3, 2]  # not use
+        #20220824
+        eval_list = np.array([nPeaks, nHoles, total_col_with_hole, total_dy,
+            x_transitions, y_transitions, total_none_cols, maxWell, fullLines])
+        
+        #print("individual", self.individual)
+        #print("eval_list", eval_list)
+        score = np.dot(self.individual, np.transpose(eval_list))
+        #if not ShapeListClass.shape == 1:
+            #if mode == Mode.NORMAL and fullLines < 3:
+                #score += 1000 * dy_right
 
-        dic_dir_3 = [0, 1, 2, 3]
-        dic_pat_3 = [0, 1, 0, 1]  # pat2:0,pat3:1,pat4:2
+        if mode == Mode.NORMAL and fullLines < 3:
+            score -= 1000 * maxY_right
+        
+        if fullLines == 4:
+            score += 10000
 
-        # TYPE-O(4)
-        # DIr0
-        dic_4_0 = {0x11: 9,
-                   0x13: 4, 0x12: 4, 0x31: 4, 0x21: 4,
-                   0x17: 3, 0x16: 3, 0x15: 3, 0x14: 3, 0x71: 3, 0x61: 3, 0x51: 3, 0x41: 3}
-        # Dir1
-        dic_4_1 = {0x11f: 8, 0x11e: 8, 0x11d: 8, 0x11c: 8, 0x11b: 8, 0x11a: 8, 0x119: 8, 0x118: 8, \
-                   0x117: 8, 0x116: 8, 0x115: 8, 0x114: 8}
-        # Dir2
-        dic_4_2 = {0xf11: 8, 0xe11: 8, 0xd11: 8, 0xc11: 8, 0xb11: 8, 0xa11: 8, 0x911: 8, 0x811: 8, \
-                   0x711: 8, 0x611: 8, 0x511: 8, 0x411: 8}
+        #if mode == Mode.ATTACK and fullLines < 4:
+            #score -= 1000 * maxY_right
 
-        dic_alix_4 = [0, 0, 1, 0]
-        dic_aliy_4 = [1, 1, 1, 0]  # not use
-        dic_ofsx_4 = [0, 0, 0, 0]  # not use
-        dic_widx_4 = [2, 2, 2, 0]
-        dic_widy_4 = [2, 2, 2, 0]  # not use
-
-        dic_dir_4 = [0]
-        dic_pat_4 = [0]  # pat2:0,pat3:1,pat4:2
-
-        # TYPE-S(5)
-        # Dir0
-        dic_5_0 = {0x113: 8, 0x112: 8, 0x111: 4}
-        # Dir1
-        dic_5_1 = {0x31: 6, 0x21: 6,
-                   0x11: 2,
-                   0x10: 5,
-                   # 0x20:1,
-                   0x01: 1
-                   }
-
-        dic_alix_5 = [1, 0, 0, 0]
-        dic_aliy_5 = [1, 1, 0, 0]  # not use
-        dic_ofsx_5 = [0, 0, 0, 0]  # not use
-        dic_widx_5 = [3, 2, 0, 0]
-        dic_widy_5 = [2, 3, 0, 0]  # not use
-
-        dic_dir_5 = [0, 1]
-        dic_pat_5 = [1, 0]  # pat2:0,pat3:1,pat4:2
-
-        # TYPE-Z(6)
-        # Dir0
-        dic_6_0 = {0x311: 8, 0x211: 8, 0x111: 4}
-        # Dir1
-        dic_6_1 = {0x13: 6, 0x12: 6,
-                   0x11: 2,
-                   0x01: 5,
-                   # 0x02:1,
-                   0x10: 1
-                   }
-
-        dic_alix_6 = [1, 0, 0, 0]
-        dic_aliy_6 = [1, 1, 0, 0]  # not use
-        dic_ofsx_6 = [0, 0, 0, 0]  # not use
-        dic_widx_6 = [3, 2, 0, 0]
-        dic_widy_6 = [2, 3, 0, 0]  # not use
-
-        dic_dir_6 = [0, 1]
-        dic_pat_6 = [1, 0]  # pat2:0,pat3:1,pat4:2
-
-        self.dic_pat_dir = []
-        dic_0 = []
-        dic_1 = []
-        dic_2 = []
-        dic_3 = []
-        dic_4 = []
-        dic_5 = []
-        dic_6 = []
-        dic_0.append(dic_0_0)
-        dic_0.append(dic_0_1)
-        dic_0.append(dic_0_2)
-        dic_0.append(dic_0_3)
-        dic_1.append(dic_1_0)
-        dic_1.append(dic_1_1)
-        dic_1.append(dic_1_2)
-        dic_1.append(dic_1_3)
-        dic_2.append(dic_2_0)
-        dic_2.append(dic_2_1)
-        dic_2.append(dic_2_2)
-        dic_2.append(dic_2_3)
-        dic_3.append(dic_3_0)
-        dic_3.append(dic_3_1)
-        dic_3.append(dic_3_2)
-        dic_3.append(dic_3_3)
-        dic_4.append(dic_4_0)
-        dic_4.append(dic_4_1)
-        dic_4.append(dic_4_2)
-        dic_5.append(dic_5_0)
-        dic_5.append(dic_5_1)
-        dic_6.append(dic_6_0)
-        dic_6.append(dic_6_1)
-        self.dic_pat_dir.append(dic_0)  # TYPE-I
-        self.dic_pat_dir.append(dic_1)  # TYPE-L
-        self.dic_pat_dir.append(dic_2)  # TYPE-J
-        self.dic_pat_dir.append(dic_3)  # TYPE-T
-        self.dic_pat_dir.append(dic_4)  # TYPE-O
-        self.dic_pat_dir.append(dic_5)  # TYPE-S
-        self.dic_pat_dir.append(dic_6)  # TYPE-Z
-
-        self.dic_alix = []
-        self.dic_aliy = []
-        self.dic_ofsx = []
-        self.dic_widx = []
-        self.dic_widy = []
-        self.dic_dir = []
-        self.dic_alix.append(dic_alix_0)
-        self.dic_alix.append(dic_alix_1)
-        self.dic_alix.append(dic_alix_2)
-        self.dic_alix.append(dic_alix_3)
-        self.dic_alix.append(dic_alix_4)
-        self.dic_alix.append(dic_alix_5)
-        self.dic_alix.append(dic_alix_6)
-        self.dic_aliy.append(dic_aliy_0)
-        self.dic_aliy.append(dic_aliy_1)
-        self.dic_aliy.append(dic_aliy_2)
-        self.dic_aliy.append(dic_aliy_3)
-        self.dic_aliy.append(dic_aliy_4)
-        self.dic_aliy.append(dic_aliy_5)
-        self.dic_aliy.append(dic_aliy_6)
-        self.dic_ofsx.append(dic_ofsx_0)
-        self.dic_ofsx.append(dic_ofsx_1)
-        self.dic_ofsx.append(dic_ofsx_2)
-        self.dic_ofsx.append(dic_ofsx_3)
-        self.dic_ofsx.append(dic_ofsx_4)
-        self.dic_ofsx.append(dic_ofsx_5)
-        self.dic_ofsx.append(dic_ofsx_6)
-        self.dic_widx.append(dic_widx_0)
-        self.dic_widx.append(dic_widx_1)
-        self.dic_widx.append(dic_widx_2)
-        self.dic_widx.append(dic_widx_3)
-        self.dic_widx.append(dic_widx_4)
-        self.dic_widx.append(dic_widx_5)
-        self.dic_widx.append(dic_widx_6)
-        self.dic_widy.append(dic_widy_0)
-        self.dic_widy.append(dic_widy_1)
-        self.dic_widy.append(dic_widy_2)
-        self.dic_widy.append(dic_widy_3)
-        self.dic_widy.append(dic_widy_4)
-        self.dic_widy.append(dic_widy_5)
-        self.dic_widy.append(dic_widy_6)
-        self.dic_dir.append(dic_dir_0)
-        self.dic_dir.append(dic_dir_1)
-        self.dic_dir.append(dic_dir_2)
-        self.dic_dir.append(dic_dir_3)
-        self.dic_dir.append(dic_dir_4)
-        self.dic_dir.append(dic_dir_5)
-        self.dic_dir.append(dic_dir_6)
-
-        self.dic_pat = []
-        self.dic_pat.append(dic_pat_0)
-        self.dic_pat.append(dic_pat_1)
-        self.dic_pat.append(dic_pat_2)
-        self.dic_pat.append(dic_pat_3)
-        self.dic_pat.append(dic_pat_4)
-        self.dic_pat.append(dic_pat_5)
-        self.dic_pat.append(dic_pat_6)
-
-        self.horder = [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]
-
-        self.horder[0] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        self.horder[1] = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
-        self.horder[2] = [0, 9, 1, 8, 2, 7, 3, 6, 4, 5]
-        self.horder[3] = [4, 5, 3, 6, 2, 7, 1, 8, 0, 9]
-
-    def makehorizontalorder(self, maxheight):
-        if maxheight < 16:  # for Lv1 15 or 16
-            # return(self.horder[2])
-            return ([0, 9, 1, 8, 2, 7, 3, 6, 4, 5])
-        else:
-            # return(self.horder[3])
-            return ([4, 5, 3, 6, 2, 7, 1, 8, 0, 9])
-
-    def checkupper(self, board, xpos, ypos):
-        block = 0
-        for yy in range(ypos, 0, -1):
-            if board[(yy) * self.width + (xpos)] != 0:
-                block = 1
-                break
-        return (block)
-
-    def counthole(self, board, xpos, ypos):
-        hole = 0
-        # if (self.height-1 < ypos+3): return(0)
-        for yy in range(ypos, self.height, 1):
-            # if (yy < height):
-            if board[(yy) * self.width + (xpos)] == 0:
-                hole += 1
+        #print ("score", score)
+        return score
+    
+    def get_peaks(self, board):
+        height = board.shape[0]
+        width = board.shape[1]
+        peaks_list = []
+        for x in range(width):
+            block_ind = board[:, x].nonzero()
+            if  len(block_ind[0]) == 0:
+                peaks_list.append(0)
             else:
-                break
-        return (hole)
+                peaks_list.append(height -  block_ind[0][0])
+        peaks = np.asarray(peaks_list)
+        return peaks
 
-    def maxblockheight(self, board):
-        for yy in range(0, self.height, 1):
-            for xx in range(0, self.width, 1):
-                if board[yy * self.width + xx] != 0:
-                    return (yy - 4)
-        return (self.height - 4)
-
-    def calcEvaluationValue(self, GameStatus):
-        self.board = GameStatus["field_info"]["backboard"]
-        self.width = GameStatus["field_info"]["width"]  # width=10
-        self.height = GameStatus["field_info"]["height"]  # height=22
-        self.index = GameStatus["block_info"]["currentShape"]["index"] - 1  # 0:I,1:L,2:J,3:T,4:O,5:S,6:Z
-        self.index_next1 = GameStatus["block_info"]["nextShape"]["index"]
-        self.index_next2 = GameStatus["block_info"]["nextShapeList"]['element2']["index"]
-        self.index_next3 = GameStatus["block_info"]["nextShapeList"]['element3']["index"]
-        self.index_next4 = GameStatus["block_info"]["nextShapeList"]['element4']["index"]
-        self.index_next5 = GameStatus["block_info"]["nextShapeList"]['element5']["index"]
-        self.hold_shape = GameStatus["block_info"]['holdShape']["index"]
-        blockheight = self.maxblockheight(self.board)
-        #if ((self.MYDEBUG)): print('blockheight=', blockheight)
-        order = self.makehorizontalorder(blockheight)
-        ypos_change = -3
-        point = [-1, -1, -1, -1]  # point,x,y,direction
-        for y in range(self.height - 3, blockheight, -1):
-            for x in order:
-                if blockheight < self.ChangeHieght:
-                    pat4 = self.calcBoardPat(self.board, x, y, 0)
-                else:
-                    pat4 = self.calcBoardPat(self.board, x, y, 1)
-                pat3 = pat4 >> 4
-                pat2 = pat4 >> 8
-                pat = [pat2, pat3, pat4]
-                print("bbbbbbbb")
-                print(pat)
-                for direction in self.dic_dir[self.index]:
-                    nopoint = 0
-                    hole = 0
-                    if (x <= (self.width - self.dic_widx[self.index][direction])) \
-                            and (pat[self.dic_pat[self.index][direction]] in self.dic_pat_dir[self.index][direction]):
-                        if self.MYDEBUG:
-                            print('index,direction,patno,pat=',self.index,direction,self.dic_pat[self.index][direction],
-                                  pat[self.dic_pat[self.index][direction]])
-                        basepoint = self.dic_pat_dir[self.index][direction][pat[self.dic_pat[self.index][direction]]]
-                        # if y >= ypos_change:
-                        getpoint = basepoint + (y * 2)
-                        # else :
-                        #     getpoint = basepoint
-                        if (self.MYDEBUG):
-                            print('[calc](index,dir,x,y)=', self.index, direction, x, y, 'pat=',
-                                  format(pat[self.dic_pat[self.index][direction]], '04x'), 'gp=', getpoint)
-                        xxmin = x + self.dic_ofsx[self.index][direction]
-                        xxmax = xxmin + self.dic_widx[self.index][direction]
-                        if (((point[0] == getpoint) and (point[2] < y)) or (point[0] < getpoint)) and (
-                                xxmax <= self.width):
-                            for xx in range(xxmin, xxmax, 1):
-                                if self.checkupper(self.board, xx, y) == 1:
-                                    if (self.MYDEBUG): print('### BLOCKED BY UPPER at ', direction, xx, y)
-                                    nopoint = 1
-                                    break
-                                hole = self.counthole(self.board, xx, y + self.dic_widy[self.index][direction] -
-                                                      self.dic_aliy[self.index][direction] + 1)
-                                if self.MYDEBUG: print("### check hole :", hole, xx,
-                                                       y + self.dic_widy[self.index][direction] -
-                                                       self.dic_aliy[self.index][direction] + 1)
-                                if (hole > 0):
-                                    if (self.MYDEBUG): print("### find HOLE next index", self.index_next1,
-                                                             self.index_next2, self.index_next3, self.index_next4,
-                                                             self.index_next5, self.hold_shape)
-                                    if (self.MYDEBUG): print("### find HOLE (", hole, ")", xx, y, format(pat4, '04x'))
-                                    if hole >= 2 and self.index_next1 == 1:
-                                        getpoint = getpoint - int(hole)
-                                        if (self.MYDEBUG): print("### use next1 block==0 ###")
-                                    elif hole >= 4 and (self.index_next2 == 1 or self.index_next3 == 1):
-                                        getpoint = getpoint - int(hole)
-                                        if (self.MYDEBUG): print("### use next2 block==0 ###")
-                                    else:
-                                        getpoint = getpoint - int(hole / 4)
-                                #    nopoint = 1
-                                #    break
-                            if (nopoint == 0):
-                                point = getpoint, x + self.dic_alix[self.index][direction], y, direction
-                                if (self.MYDEBUG):
-                                    print("[stock]point =", point[0],
-                                          ",x =", point[1],
-                                          ",y =", point[2],
-                                          ",index =", self.index + 1,
-                                          ",dir =", point[3],
-                                          ",pat =", format(pat[self.dic_pat[self.index][direction]], '04x'))
-
-            if (self.MYDEBUG) : print("x,y,pat=",x,y,format(pat4,'04x'),"point=",point)
-        return point[0], point[1], point[3]
-
-    def calcBoardPat(self, board, x, y, xofs):
-        patx = [0, 0, 0, 0]
-        for xx in range(x, x + 4, 1):
-            if xx < self.width - xofs:
-                for yy in range(y, y + 4, 1):
-                    if (yy < self.height):
-                        if (board[yy * self.width + xx] != 0):
-                            if yy == y + 0:
-                                patx[xx - x] += 8
-                            elif yy == y + 1:
-                                patx[xx - x] += 4
-                            elif yy == y + 2:
-                                patx[xx - x] += 2
-                            elif yy == y + 3:
-                                patx[xx - x] += 1
-                            # patx[xx-x] += 2**(3-yy+y)
-                    else:
-                        if yy == y + 0:
-                            patx[xx - x] += 8
-                        elif yy == y + 1:
-                            patx[xx - x] += 4
-                        elif yy == y + 2:
-                            patx[xx - x] += 2
-                        elif yy == y + 3:
-                            patx[xx - x] += 1
-                        # patx[xx-x] += 2**(3-yy+y)
+    def get_holes(self, board, peaks = None):
+        height = board.shape[0]
+        width = board.shape[1]
+        if peaks is None:
+            peaks = self.get_peaks(board)
+        holes_list = []
+        for col in range(width):
+            start_raw = height - peaks[col]
+            if start_raw == 0:
+                holes_list.append(0)
             else:
-                patx[xx - x] = 15
-        pat = patx[0] * 4096 + patx[1] * 256 + patx[2] * 16 + patx[3]
-        print("aaaaaaaa")
-        print(pat)
-        return (pat)
-
+                holes_list.append(np.count_nonzero(board[start_raw:, col] == 0))
+        holes = np.asarray(holes_list)
+        return holes
+    
+    def get_fullLines(self, board):
+        height = board.shape[0]
+        width = board.shape[1]
+        fullLines = 0
+        for raw in range(height):
+            blocks = np.count_nonzero(board[raw] != self.ShapeNone_index)
+            if blocks == width:
+                fullLines += 1
+        return fullLines
+    
+    def get_total_cols_with_hole(self, board, holes = None):
+        if holes is None:
+            holes = self.get_holes(board)
+        return np.count_nonzero(holes > 0)
+    
+    def get_x_transitions(self, board, maxY = None):
+        if maxY is None:
+            maxY = self.get_maxY(board)
+        height = board.shape[0]
+        width = board.shape[1]
+        transitions = 0
+        for y in range(height - maxY, height):
+            for x in range(1, width):
+                if board[y, x] != board[y, x-1]:
+                    transitions += 1
+        return transitions
+    
+    def get_y_transitions(self, board, peaks = None):
+        if peaks is None:
+            peaks = self.get_peaks(board)
+        height = board.shape[0]
+        width = board.shape[1]
+        transitions = 0
+        for x in range(width):
+            for y in range(height - peaks[x], height -1):
+                if board[y, x] != board[y+1, x]:
+                    transitions += 1
+        return transitions
+    
+    def get_total_dy(self, board, peaks = None):
+        if peaks is None:
+            peaks = self.get_peaks(board)
+        total_dy = 0
+        for x in range(len(peaks)-1):
+            total_dy += np.abs(peaks[x+1] - peaks[x])
+        return total_dy
+    
+    def get_wells(self, board, peaks = None):
+        if peaks is None:
+            peaks = self.get_peaks(board)
+        wells = []
+        for x in range(len(peaks)):
+            if x == 0:
+                well = peaks[1] - peaks[0]
+                well = well if well > 0 else 0
+                wells.append(well)
+            elif x == len(peaks) - 1:
+                well = peaks[-2] - peaks[-1]
+                well = well if well > 0 else 0
+                wells.append(well)
+            else:
+                w1 = peaks[x - 1] - peaks[x]
+                w2 = peaks[x + 1] - peaks[x]
+                w1 = w1 if w1 > 0 else 0
+                w2 = w2 if w2 > 0 else 0
+                well = w1 if w1 >= w2 else w2
+                wells.append(well)
+        return wells
+    
+    def get_total_none_cols(self, board):
+        return np.count_nonzero(np.count_nonzero(board, axis=0) == 0)
 
 BLOCK_CONTROLLER = Block_Controller()
-LIB_TETRIS = lib_tetris()
-

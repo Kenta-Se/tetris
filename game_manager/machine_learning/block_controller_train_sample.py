@@ -82,10 +82,10 @@ class Block_Controller(object):
         with open(self.log_reward,"w") as f:
             print(0, file=f)
 
-        #=====Set tetris parameter=====
-        self.height = cfg["tetris"]["board_height"]
-        self.width = cfg["tetris"]["board_width"]
-        self.max_tetrominoes = cfg["tetris"]["max_tetrominoes"]
+        #=====Set tetris_20230226 parameter=====
+        self.height = cfg["tetris_20230226"]["board_height"]
+        self.width = cfg["tetris_20230226"]["board_width"]
+        self.max_tetrominoes = cfg["tetris_20230226"]["max_tetrominoes"]
         
         #=====load Deep Q Network=====
         self.state_dim = cfg["state"]["dim"]
@@ -170,7 +170,7 @@ class Block_Controller(object):
         self.gamma = cfg["train"]["gamma"]
         self.reward_clipping = cfg["train"]["reward_clipping"]
 
-        self.score_list = cfg["tetris"]["score_list"]
+        self.score_list = cfg["tetris_20230226"]["score_list"]
         self.reward_list = cfg["train"]["reward_list"]
         self.penalty =  self.reward_list[5]
         
