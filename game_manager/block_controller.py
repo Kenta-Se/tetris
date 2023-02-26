@@ -240,9 +240,6 @@ class Block_Controller(object):
         second_well = np.sort(wells)[-2]
         if second_well < 5 and maxY < 15 and n_holes < 4:
             mode = Mode.NORMAL
-        #if second_well < 5 and maxY < 12 and n_holes < 4:
-            #mode = Mode.ATTACK
-        #print("mode:", mode)
         return mode
 
     def calcEvaluationValue(self, board, dy, ShapeListClass, mode = Mode.ATTACK):
