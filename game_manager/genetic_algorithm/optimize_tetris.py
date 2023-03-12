@@ -97,7 +97,7 @@ if __name__ == '__main__':
     toolbox.register("mutate", tools.mutGaussian, mu=mu_list, sigma=sigma_list, indpb=0.2)
 
     if checkpoint_file:
-        #Copy past evolution data
+        #Copy pastß evolution data
         with open(checkpoint_file, "rb") as cp_file:
             try:
                 cp = pickle.load(cp_file)
