@@ -1,5 +1,5 @@
 #GA parameter
-NIND = 1
+NIND = 100
 NGEN = 50
 POP = 50
 CXPB = 0.6
