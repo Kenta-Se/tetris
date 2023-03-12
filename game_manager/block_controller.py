@@ -81,6 +81,7 @@ class Block_Controller(object):
                 board, dy= self.getDropDownBoard(self.board_backboard_np, CurrentShapeClass, direction0, x0)
                 # evaluate board
                 EvalValue = self.calcEvaluationValue(board, dy, CurrentShapeClass, mode)
+                print(EvalValue)
                 # get board removed fulllines
                 board, _ = self.removeFullLines(board)
                 strategy = (direction0, x0, 1, 1, 'n')
@@ -147,7 +148,7 @@ class Block_Controller(object):
 
         return nextMove
 
-    def get_individual(self, csv_file = "individual.csv"):
+    def get_individual(self, csv_file = "/individual.csv"):
         with open(csv_file, 'r') as csv_file:
             reader = csv.reader(csv_file)
             ind_list = []
@@ -266,8 +267,7 @@ class Block_Controller(object):
         dy_right = peaks[-2] - peaks[-1]
 
         eval_list = np.array([nPeaks, nHoles, total_col_with_hole, total_dy,
-            x_transitions, y_transitions, total_none_cols, maxWell, fullLines])
-
+                              x_transitions, y_transitions, total_none_cols, maxWell, fullLines])
         score = np.dot(self.individual, np.transpose(eval_list))
 
         if mode == Mode.NORMAL and fullLines < 3:

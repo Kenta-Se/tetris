@@ -303,7 +303,7 @@ class BoardData(object):
     # 次のテトリミノの取得
     #################################################
     def getNewShapeIndex(self):
-        if self.random_seed == 0:
+        if self.random_seed == -1:
             # static value
             nextShapeIndex = self.nextShapeIndexList[self.nextShapeIndexCnt]
             self.nextShapeIndexCnt += 1
