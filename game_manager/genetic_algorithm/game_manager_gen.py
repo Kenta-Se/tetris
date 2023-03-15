@@ -71,10 +71,10 @@ def get_option(game_time, mode, drop_interval, random_seed, obstacle_height, obs
 #####################################################################
 class Game_Manager(QMainWindow):
     # a[n] = n^2 - n + 1
-    LINE_SCORE_1 = 100
+    LINE_SCORE_1 = 10
     LINE_SCORE_2 = 300
-    LINE_SCORE_3 = 700
-    LINE_SCORE_4 = 1300
+    LINE_SCORE_3 = 7000
+    LINE_SCORE_4 = 130000
     GAMEOVER_SCORE = -500
 
     ###############################################
